@@ -1122,8 +1122,8 @@
       verbose: false
     });
 
-    const SCAN_COOLDOWN_MS = 6000;
-    const SCANNER_PAUSE_MS = 260;
+    const SCAN_COOLDOWN_MS = 15000;
+    const SCANNER_PAUSE_MS = 900;
     const REQUEST_TIMEOUT_MS = 18000;
     const SCANNER_REQUEST_TIMEOUT_MS = 30000;
     const PENDING_SCANS_KEY = "recitationPendingScansV1";
@@ -1142,6 +1142,7 @@
     let localStudentCache = loadStudentCache();
     const recentScanLocks = new Map();
     const duplicateNoticeLocks = new Map();
+    let lastCameraScanKey = "";
 
     function showResult(target, type, message) {
       target.style.display = "block";
@@ -1465,11 +1466,7 @@
     }
 
     function buildScanKey(studentId, activity, points) {
-      return [
-        studentId.toUpperCase(),
-        activity.toUpperCase(),
-        String(points)
-      ].join("|");
+      return normalizeStudentId(studentId).toUpperCase();
     }
 
     function cleanupScanLocks() {
@@ -1490,8 +1487,24 @@
       showResult(
         scannerResult,
         "queued",
-        "Duplicate scan ignored for " + studentId + ".\nMove to the next student."
+        "Please move to the next student.\nThis ID was just scanned."
       );
+    }
+
+    function shouldIgnoreHeldCameraScan(studentIdValue) {
+      const scanKey = normalizeStudentId(studentIdValue).toUpperCase();
+      if (!scanKey) return false;
+
+      // While the same QR remains in front of the camera, ignore repeated frames silently.
+      // This prevents warning messages when the student ID is held too long.
+      if (scanKey === lastCameraScanKey) return true;
+
+      lastCameraScanKey = scanKey;
+      return false;
+    }
+
+    function resetHeldCameraScan() {
+      lastCameraScanKey = "";
     }
 
     function pauseScannerBriefly() {
@@ -1517,7 +1530,7 @@
       }, SCANNER_PAUSE_MS);
     }
 
-    function prepareScan(studentIdValue) {
+    function prepareScan(studentIdValue, source = "manual") {
       const studentId = String(studentIdValue || "").trim();
       const activity = syncDefaultActivityName();
       const points = Number(pointsInput.value);
@@ -1558,7 +1571,9 @@
 
       const key = buildScanKey(studentId, activity, points);
       if (recentScanLocks.has(key)) {
-        showDuplicateNotice(key, studentId);
+        if (source !== "camera") {
+          showDuplicateNotice(key, studentId);
+        }
         return null;
       }
 
@@ -1679,15 +1694,11 @@
           requestId: scanItem.id
         }, "scannerCallback_", SCANNER_REQUEST_TIMEOUT_MS);
 
-        const resultType = data.status === "success"
-          ? "success"
-          : data.status === "duplicate"
-            ? "queued"
-            : "error";
+        const resultType = data.status === "success" ? "success" : "error";
 
         if (data.status !== "success" && data.status !== "duplicate") {
           showResult(scannerResult, resultType, data.message);
-        } else if (canShowSyncStatus()) {
+        } else if (data.status === "success" && canShowSyncStatus()) {
           showResult(scannerResult, resultType, data.message);
         }
 
@@ -1695,7 +1706,6 @@
           addRecentScan(data.message);
           return { ok: true, removeIds: [scanItem.id] };
         } else if (data.status === "duplicate") {
-          addRecentScan(data.message);
           return { ok: true, removeIds: [scanItem.id] };
         } else {
           playErrorFeedback();
@@ -1809,7 +1819,8 @@
         return;
       }
 
-      const scanItem = prepareScan(studentId);
+      resetHeldCameraScan();
+      const scanItem = prepareScan(studentId, "manual");
       if (!scanItem) return;
 
       manualButton.disabled = true;
@@ -1834,7 +1845,10 @@
           (decodedText) => {
             if (scanPauseActive) return;
 
-            const scanItem = prepareScan(normalizeStudentId(decodedText));
+            const studentId = normalizeStudentId(decodedText);
+            if (shouldIgnoreHeldCameraScan(studentId)) return;
+
+            const scanItem = prepareScan(studentId, "camera");
             pauseScannerBriefly();
 
             if (scanItem) enqueueScan(scanItem);

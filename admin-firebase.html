@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#111827">
-  <title>Firebase Recitation Admin</title>
+  <title>Recitation Admin</title>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
   <style>
     :root {
@@ -549,7 +549,7 @@
     <header class="hero">
       <div>
         <div class="eyebrow">Recitation Central</div>
-        <h1>Firebase Admin</h1>
+        <h1>Admin</h1>
         <div class="credit">Developed by Mr. John Rey Tubello (Sir JR)</div>
       </div>
       <div class="header-menu-wrap">
@@ -1228,7 +1228,7 @@
         closeModal();
         showResult("success", (mode === "add" ? "Added: " : "Updated: ") + fullName);
       } catch (error) {
-        showResult("error", "Firebase save failed:\n" + error.message);
+        showResult("error", "Save failed:\n" + error.message);
       } finally {
         addButton.disabled = false;
         saveButton.disabled = false;
@@ -1261,7 +1261,7 @@
         closeModal();
         showResult("success", "Deleted: " + (fullName || studentId));
       } catch (error) {
-        showResult("error", "Firebase delete failed:\n" + error.message);
+        showResult("error", "Delete failed:\n" + error.message);
       } finally {
         addButton.disabled = false;
         saveButton.disabled = false;
@@ -1275,7 +1275,7 @@
         return;
       }
 
-      showResult("loading", "Connecting to Firebase...");
+      showResult("loading", "Connecting...");
 
       if (unsubscribeStudents) unsubscribeStudents();
       if (unsubscribeSections) unsubscribeSections();

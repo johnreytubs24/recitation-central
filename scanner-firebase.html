@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#111827">
-  <title>Firebase Recitation Scanner</title>
+  <title>Recitation Scanner</title>
   <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
   <style>
     :root {
@@ -618,7 +618,7 @@
     <section class="hero">
       <div>
         <div class="eyebrow">Recitation Central</div>
-        <h1>Firebase Scanner</h1>
+        <h1>Scanner</h1>
         <div class="credit">Developed by Mr. John Rey Tubello (Sir JR)</div>
       </div>
       <div class="header-menu-wrap">
@@ -789,10 +789,12 @@
       verbose: false
     });
 
-    const SCAN_COOLDOWN_MS = 6000;
-    const SCANNER_PAUSE_MS = 320;
+    const STUDENT_RESCAN_BLOCK_MS = 15000;
+    const SCANNER_PAUSE_MS = 900;
     let scannerStarted = false;
     let scanPauseActive = false;
+    let lastCameraScanKey = "";
+    let lastCameraScanAt = 0;
     let audioContext = null;
     const recentLocks = new Map();
     const recentRecords = [];
@@ -921,8 +923,30 @@
       });
     }
 
-    function buildLockKey(studentId, points) {
-      return studentId.toUpperCase() + "::" + String(points);
+    function buildLockKey(studentId) {
+      return normalizeStudentId(studentId).toUpperCase();
+    }
+
+    function shouldIgnoreHeldCameraScan(studentIdValue) {
+      const scanKey = normalizeStudentId(studentIdValue).toUpperCase();
+      const now = Date.now();
+
+      if (!scanKey) return false;
+
+      // Do not process the same QR again while it is still in front of the camera.
+      // A different student QR must be detected first before this one can be scanned again.
+      if (scanKey === lastCameraScanKey) {
+        return true;
+      }
+
+      lastCameraScanKey = scanKey;
+      lastCameraScanAt = now;
+      return false;
+    }
+
+    function resetHeldCameraScan() {
+      lastCameraScanKey = "";
+      lastCameraScanAt = 0;
     }
 
 
@@ -1174,7 +1198,7 @@
       }
     }
 
-    async function recordStudent(studentIdValue) {
+    async function recordStudent(studentIdValue, source = "manual") {
       unlockFeedback();
       cleanupLocks();
 
@@ -1202,13 +1226,15 @@
         return;
       }
 
-      const lockKey = buildLockKey(studentId, points);
+      const lockKey = buildLockKey(studentId);
       if (recentLocks.has(lockKey)) {
-        showResult("queued", "Duplicate scan ignored for " + studentId + ".\nMove to the next student.");
+        if (source !== "camera") {
+          showResult("queued", "Please move to the next student.\nThis ID was just scanned.");
+        }
         return;
       }
 
-      recentLocks.set(lockKey, Date.now() + SCAN_COOLDOWN_MS);
+      recentLocks.set(lockKey, Date.now() + STUDENT_RESCAN_BLOCK_MS);
       showResult("loading", "Saving " + studentId + "...");
 
       try {
@@ -1250,12 +1276,12 @@
         });
 
         const displayName = student.fullName || studentId;
-        showResult("success", "Recorded: " + displayName + " +" + points + "\n" + term.name + " | Firebase leaderboard updates live.");
+        showResult("success", "Recorded: " + displayName + " +" + points + "\n" + term.name + " | Leaderboard updates live.");
         addRecent(displayName + " +" + points + "\n" + (student.section || "") + " | " + term.name);
         successFeedback();
       } catch (error) {
         recentLocks.delete(lockKey);
-        showResult("error", "Firebase save failed:\n" + error.message);
+        showResult("error", "Save failed:\n" + error.message);
         errorFeedback();
       }
     }
@@ -1335,8 +1361,9 @@
           { fps: 15, qrbox: { width: 220, height: 220 }, aspectRatio: 1, disableFlip: true },
           (decodedText) => {
             if (scanPauseActive) return;
+            if (shouldIgnoreHeldCameraScan(decodedText)) return;
             pauseScannerBriefly();
-            recordStudent(decodedText);
+            recordStudent(decodedText, "camera");
           }
         );
 
@@ -1351,14 +1378,16 @@
     manualButton.addEventListener("click", () => {
       const studentId = manualStudentId.value;
       manualStudentId.value = "";
-      recordStudent(studentId);
+      resetHeldCameraScan();
+      recordStudent(studentId, "manual");
     });
 
     manualStudentId.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         const studentId = manualStudentId.value;
         manualStudentId.value = "";
-        recordStudent(studentId);
+        resetHeldCameraScan();
+        recordStudent(studentId, "manual");
       }
     });
 
