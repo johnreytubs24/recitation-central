@@ -1140,9 +1140,10 @@
     const recentScans = [];
     let scanQueue = loadPendingScans();
     let localStudentCache = loadStudentCache();
-    const recentScanLocks = new Map();
-    const duplicateNoticeLocks = new Map();
-    let lastCameraScanKey = "";
+    let lastAcceptedScanKey = "";
+    let lastAcceptedScanAt = 0;
+    let lastCameraWarningKey = "";
+    let lastCameraWarningAt = 0;
 
     function showResult(target, type, message) {
       target.style.display = "block";
@@ -1471,42 +1472,44 @@
 
     function cleanupScanLocks() {
       const now = Date.now();
-      recentScanLocks.forEach((expiresAt, key) => {
-        if (expiresAt <= now) recentScanLocks.delete(key);
-      });
-      duplicateNoticeLocks.forEach((expiresAt, key) => {
-        if (expiresAt <= now) duplicateNoticeLocks.delete(key);
-      });
+      if (lastCameraWarningAt && now - lastCameraWarningAt > 2500) {
+        lastCameraWarningKey = "";
+        lastCameraWarningAt = 0;
+      }
+    }
+
+    function isSameStudentWaitActive(scanKey) {
+      return lastAcceptedScanKey === scanKey && lastAcceptedScanAt > 0 && Date.now() - lastAcceptedScanAt < SCAN_COOLDOWN_MS;
+    }
+
+    function markAcceptedScan(scanKey) {
+      lastAcceptedScanKey = scanKey;
+      lastAcceptedScanAt = Date.now();
+      lastCameraWarningKey = "";
+      lastCameraWarningAt = 0;
     }
 
     function showDuplicateNotice(key, studentId) {
       cleanupScanLocks();
-      if (duplicateNoticeLocks.has(key)) return;
+      const now = Date.now();
+      if (lastCameraWarningKey === key && now - lastCameraWarningAt < 2500) return;
 
-      duplicateNoticeLocks.set(key, Date.now() + 1200);
+      lastCameraWarningKey = key;
+      lastCameraWarningAt = now;
       showResult(
         scannerResult,
         "queued",
-        "Wait 1 minute before scanning this same student again."
+        "SAME STUDENT, WAIT FOR 1 MINUTE before scanning again.\nOr scan another student first."
       );
     }
 
     function shouldIgnoreHeldCameraScan(studentIdValue) {
-      const scanKey = normalizeStudentId(studentIdValue).toUpperCase();
-      if (!scanKey) return false;
-
-      cleanupScanLocks();
-
-      // Same QR frames should be ignored silently while the 1-minute student lock is active.
-      // After 1 minute, the same student can be scanned again even if they are still next.
-      if (scanKey === lastCameraScanKey && recentScanLocks.has(scanKey)) return true;
-
-      lastCameraScanKey = scanKey;
       return false;
     }
 
     function resetHeldCameraScan() {
-      lastCameraScanKey = "";
+      lastCameraWarningKey = "";
+      lastCameraWarningAt = 0;
     }
 
     function pauseScannerBriefly() {
@@ -1572,14 +1575,12 @@
       cleanupScanLocks();
 
       const key = buildScanKey(studentId, activity, points);
-      if (recentScanLocks.has(key)) {
-        if (source !== "camera") {
-          showDuplicateNotice(key, studentId);
-        }
+      if (isSameStudentWaitActive(key)) {
+        showDuplicateNotice(key, studentId);
         return null;
       }
 
-      recentScanLocks.set(key, Date.now() + SCAN_COOLDOWN_MS);
+      markAcceptedScan(key);
 
       return {
         id: "scan_" + Date.now() + "_" + Math.floor(Math.random() * 100000),
@@ -1712,7 +1713,6 @@
         } else {
           playErrorFeedback();
           addRecentScan(data.message || "Scan was rejected by backend.");
-          recentScanLocks.delete(scanItem.key);
 
           const message = String(data.message || "");
           const isPermanentError =

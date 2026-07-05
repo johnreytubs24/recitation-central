@@ -793,10 +793,14 @@
     const SCANNER_PAUSE_MS = 900;
     let scannerStarted = false;
     let scanPauseActive = false;
+    let cameraScanBusy = false;
     let lastCameraScanKey = "";
     let lastCameraScanAt = 0;
+    let lastAcceptedScanKey = "";
+    let lastAcceptedScanAt = 0;
+    let lastWarningKey = "";
+    let lastWarningAt = 0;
     let audioContext = null;
-    const recentLocks = new Map();
     const recentRecords = [];
     let bulkStudents = [];
     let bulkLoaded = false;
@@ -918,37 +922,50 @@
 
     function cleanupLocks() {
       const now = Date.now();
-      recentLocks.forEach((expiresAt, key) => {
-        if (expiresAt <= now) recentLocks.delete(key);
-      });
+      if (lastWarningAt && now - lastWarningAt > 2500) {
+        lastWarningKey = "";
+        lastWarningAt = 0;
+      }
     }
 
     function buildLockKey(studentId) {
       return normalizeStudentId(studentId).toUpperCase();
     }
 
+    function isSameStudentWaitActive(lockKey) {
+      return lastAcceptedScanKey === lockKey && lastAcceptedScanAt > 0 && Date.now() - lastAcceptedScanAt < STUDENT_RESCAN_BLOCK_MS;
+    }
+
+    function markAcceptedStudent(lockKey) {
+      lastAcceptedScanKey = lockKey;
+      lastAcceptedScanAt = Date.now();
+      lastWarningKey = "";
+      lastWarningAt = 0;
+    }
+
+    function showSameStudentWait(lockKey) {
+      cleanupLocks();
+      const now = Date.now();
+      if (lastWarningKey === lockKey && now - lastWarningAt < 2500) return;
+      lastWarningKey = lockKey;
+      lastWarningAt = now;
+      showResult("queued", "SAME STUDENT, WAIT FOR 1 MINUTE before scanning again.\nOr scan another student first.");
+      waitFeedback();
+    }
+
     function shouldIgnoreHeldCameraScan(studentIdValue) {
       const scanKey = normalizeStudentId(studentIdValue).toUpperCase();
-      const now = Date.now();
-
       if (!scanKey) return false;
-
-      cleanupLocks();
-
-      // Same QR frames should be ignored silently while the 1-minute student lock is active.
-      // After 1 minute, the same student can be scanned again even if they are still next.
-      if (scanKey === lastCameraScanKey && recentLocks.has(scanKey)) {
-        return true;
-      }
-
       lastCameraScanKey = scanKey;
-      lastCameraScanAt = now;
+      lastCameraScanAt = Date.now();
       return false;
     }
 
     function resetHeldCameraScan() {
       lastCameraScanKey = "";
       lastCameraScanAt = 0;
+      lastWarningKey = "";
+      lastWarningAt = 0;
     }
 
 
@@ -1229,14 +1246,11 @@
       }
 
       const lockKey = buildLockKey(studentId);
-      if (recentLocks.has(lockKey)) {
-        if (source !== "camera") {
-          showResult("queued", "Wait 1 minute before scanning this same student again.");
-        }
+      if (isSameStudentWaitActive(lockKey)) {
+        showSameStudentWait(lockKey);
         return false;
       }
 
-      recentLocks.set(lockKey, Date.now() + STUDENT_RESCAN_BLOCK_MS);
       showResult("loading", "Saving " + studentId + "...");
 
       try {
@@ -1244,7 +1258,6 @@
         const studentSnap = await getDoc(studentRef);
 
         if (!studentSnap.exists()) {
-          recentLocks.delete(lockKey);
           showResult("error", "Student ID not found: " + studentId);
           errorFeedback();
           return false;
@@ -1280,10 +1293,10 @@
         const displayName = student.fullName || studentId;
         showResult("success", "Recorded: " + displayName + " +" + points + "\n" + term.name + " | Leaderboard updates live.");
         addRecent(displayName + " +" + points + "\n" + (student.section || "") + " | " + term.name);
+        markAcceptedStudent(lockKey);
         successFeedback();
         return true;
       } catch (error) {
-        recentLocks.delete(lockKey);
         showResult("error", "Save failed:\n" + error.message);
         errorFeedback();
         return false;
@@ -1364,11 +1377,16 @@
           { facingMode: "environment" },
           { fps: 15, qrbox: { width: 220, height: 220 }, aspectRatio: 1, disableFlip: true },
           async (decodedText) => {
-            if (scanPauseActive) return;
+            if (scanPauseActive || cameraScanBusy) return;
             if (shouldIgnoreHeldCameraScan(decodedText)) return;
 
-            const accepted = await recordStudent(decodedText, "camera");
-            if (accepted) pauseScannerBriefly();
+            cameraScanBusy = true;
+            try {
+              const accepted = await recordStudent(decodedText, "camera");
+              if (accepted) pauseScannerBriefly();
+            } finally {
+              cameraScanBusy = false;
+            }
           }
         );
 

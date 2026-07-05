@@ -1,4 +1,4 @@
-const CACHE_NAME = "recitation-central-admin-compact-header-v1";
+const CACHE_NAME = "recitation-central-same-student-sequence-v2";
 const APP_SHELL = [
   "./",
   "./index.html",
