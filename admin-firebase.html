@@ -409,6 +409,86 @@
       white-space: nowrap;
     }
 
+    .points-editor {
+      display: none;
+      margin-top: 12px;
+      border: 1px solid rgba(245, 158, 11, 0.26);
+      border-radius: 12px;
+      padding: 12px;
+      background: #fff7d6;
+    }
+
+    .points-editor.active {
+      display: block;
+    }
+
+    .points-editor-title {
+      margin: 0 0 10px;
+      color: #78350f;
+      font-size: 12px;
+      font-weight: 950;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .points-editor-summary {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .points-stat {
+      border: 1px solid rgba(245, 158, 11, 0.22);
+      border-radius: 10px;
+      padding: 10px;
+      background: white;
+    }
+
+    .points-stat span {
+      display: block;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 950;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+    }
+
+    .points-stat strong {
+      display: block;
+      margin-top: 4px;
+      color: var(--ink);
+      font-size: 20px;
+      line-height: 1;
+    }
+
+    .points-adjust-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .points-adjust-button.add {
+      background: #dcfce7;
+      color: #166534;
+      border: 1px solid #86efac;
+    }
+
+    .points-adjust-button.minus {
+      background: #fee2e2;
+      color: #991b1b;
+      border: 1px solid #fecaca;
+    }
+
+    .points-help {
+      margin: 8px 0 0;
+      color: #92400e;
+      font-size: 12px;
+      font-weight: 800;
+      line-height: 1.35;
+    }
+
     .empty {
       border: 1px dashed #cbd5e1;
       border-radius: 12px;
@@ -541,6 +621,11 @@
       .points {
         width: fit-content;
       }
+
+      .points-editor-summary,
+      .points-adjust-row {
+        grid-template-columns: 1fr;
+      }
     }
   </style>
 </head>
@@ -655,6 +740,30 @@
         </div>
       </div>
 
+      <section id="pointsEditor" class="points-editor" aria-label="Edit student points">
+        <p class="points-editor-title">Edit Points</p>
+        <div class="points-editor-summary">
+          <div class="points-stat">
+            <span id="pointsTermLabel">Selected Term</span>
+            <strong id="currentTermPoints">0 pts</strong>
+          </div>
+          <div class="points-stat">
+            <span>All Time Total</span>
+            <strong id="currentTotalPoints">0 pts</strong>
+          </div>
+        </div>
+        <div>
+          <label for="pointsAdjustInput">Custom Point Change</label>
+          <input id="pointsAdjustInput" type="number" step="1" placeholder="Example: 1 or -1">
+        </div>
+        <div class="points-adjust-row">
+          <button id="subtractPointButton" class="points-adjust-button minus" type="button">-1 Point</button>
+          <button id="addPointButton" class="points-adjust-button add" type="button">+1 Point</button>
+        </div>
+        <button id="applyPointsButton" class="secondary" type="button" style="margin-top: 8px;">Apply Custom Change</button>
+        <p class="points-help">Every point edit asks for confirmation first and is saved as an admin adjustment log.</p>
+      </section>
+
       <div class="modal-actions">
         <button id="addButton" type="button">Add Student</button>
         <button id="saveButton" class="secondary" type="button">Save Edit</button>
@@ -681,7 +790,8 @@
       orderBy,
       query,
       serverTimestamp,
-      setDoc
+      setDoc,
+      writeBatch
     } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
     const firebaseConfig = {
@@ -728,9 +838,18 @@
     const addButton = document.getElementById("addButton");
     const saveButton = document.getElementById("saveButton");
     const deleteButton = document.getElementById("deleteButton");
+    const pointsEditor = document.getElementById("pointsEditor");
+    const pointsTermLabel = document.getElementById("pointsTermLabel");
+    const currentTermPoints = document.getElementById("currentTermPoints");
+    const currentTotalPoints = document.getElementById("currentTotalPoints");
+    const pointsAdjustInput = document.getElementById("pointsAdjustInput");
+    const subtractPointButton = document.getElementById("subtractPointButton");
+    const addPointButton = document.getElementById("addPointButton");
+    const applyPointsButton = document.getElementById("applyPointsButton");
 
     let allStudents = [];
     let allSections = [];
+    let selectedStudent = null;
     let unsubscribeStudents = null;
     let unsubscribeSections = null;
 
@@ -849,6 +968,64 @@
       }
 
       return explicitTermPoints;
+    }
+
+    function effectiveEditTerm() {
+      const selected = selectedTermId();
+      if (selected && selected !== "allTime") {
+        return {
+          id: selected,
+          name: selectedTermLabel(),
+          schoolYear: getTermInfo().schoolYear
+        };
+      }
+
+      const current = getTermInfo();
+      return {
+        id: current.id,
+        name: current.name + " (Current Term)",
+        schoolYear: current.schoolYear
+      };
+    }
+
+    function explicitTermPointsFor(student, termId) {
+      const termTotals = student && student.termTotals ? student.termTotals : {};
+      return Number(termTotals[termId]) || 0;
+    }
+
+    function editableTermPointsFor(student, termId) {
+      if (!student) return 0;
+      if (termId === "allTime") return Number(student.totalPoints) || 0;
+
+      const termTotals = student.termTotals || {};
+      const explicitTermPoints = Number(termTotals[termId]) || 0;
+
+      if (termId === "term1") {
+        const assignedTermPoints = ["term1", "term2", "term3", "outOfTerm"].reduce((total, key) => {
+          return total + (Number(termTotals[key]) || 0);
+        }, 0);
+        const legacyUnassignedPoints = Math.max(0, (Number(student.totalPoints) || 0) - assignedTermPoints);
+        return explicitTermPoints + legacyUnassignedPoints;
+      }
+
+      return explicitTermPoints;
+    }
+
+    function formatPoints(value) {
+      const points = Number(value) || 0;
+      return points + " pt" + (Math.abs(points) === 1 ? "" : "s");
+    }
+
+    function refreshPointsEditor() {
+      if (!selectedStudent) return;
+
+      const latestStudent = allStudents.find((student) => student.studentId === selectedStudent.studentId) || selectedStudent;
+      selectedStudent = latestStudent;
+
+      const term = effectiveEditTerm();
+      pointsTermLabel.textContent = term.name;
+      currentTermPoints.textContent = formatPoints(editableTermPointsFor(latestStudent, term.id));
+      currentTotalPoints.textContent = formatPoints(latestStudent.totalPoints);
     }
 
     function latestMillis(student) {
@@ -1155,17 +1332,21 @@
 
     function openModal(mode, student) {
       const isEdit = mode === "edit";
+      selectedStudent = isEdit && student ? student : null;
       modalTitle.textContent = isEdit ? "Edit Student" : "Add Student";
       addButton.style.display = isEdit ? "none" : "block";
       saveButton.style.display = isEdit ? "block" : "none";
       deleteButton.style.display = isEdit ? "block" : "none";
+      pointsEditor.classList.toggle("active", isEdit);
       studentIdInput.disabled = isEdit;
+      pointsAdjustInput.value = "";
 
       if (isEdit && student) {
         studentIdInput.value = student.studentId;
         fullNameInput.value = student.fullName;
         sectionInput.value = student.section;
         genderInput.value = student.gender || "";
+        refreshPointsEditor();
       } else {
         studentIdInput.value = "";
         fullNameInput.value = "";
@@ -1182,6 +1363,8 @@
       studentModal.classList.remove("active");
       studentModal.setAttribute("aria-hidden", "true");
       studentIdInput.disabled = false;
+      selectedStudent = null;
+      pointsAdjustInput.value = "";
     }
 
     async function saveStudent(mode) {
@@ -1232,6 +1415,110 @@
       } finally {
         addButton.disabled = false;
         saveButton.disabled = false;
+      }
+    }
+
+    async function adjustStudentPoints(delta) {
+      if (!auth.currentUser) {
+        showResult("error", "Please sign in first.");
+        return;
+      }
+
+      if (!selectedStudent) {
+        showResult("error", "Please select a student first.");
+        return;
+      }
+
+      const pointChange = Number(delta);
+      if (!Number.isFinite(pointChange) || pointChange === 0 || !Number.isInteger(pointChange)) {
+        showResult("error", "Enter a whole number point change, like 1 or -1.");
+        return;
+      }
+
+      const studentId = normalizeId(selectedStudent.studentId);
+      const fullName = normalizeId(fullNameInput.value) || selectedStudent.fullName || studentId;
+      const section = normalizeId(sectionInput.value) || selectedStudent.section || "";
+      const gender = normalizeGender(genderInput.value) || selectedStudent.gender || "";
+      const term = effectiveEditTerm();
+      const currentTermTotal = editableTermPointsFor(selectedStudent, term.id);
+      const currentAllTimeTotal = Number(selectedStudent.totalPoints) || 0;
+      const newTermTotal = currentTermTotal + pointChange;
+      const newAllTimeTotal = currentAllTimeTotal + pointChange;
+
+      if (newTermTotal < 0 || newAllTimeTotal < 0) {
+        showResult("error", "Cannot subtract more points than the student currently has for " + term.name + ".");
+        return;
+      }
+
+      const actionText = pointChange > 0 ? "ADD" : "SUBTRACT";
+      const absChange = Math.abs(pointChange);
+      const confirmed = confirm(
+        actionText + " " + absChange + " point" + (absChange === 1 ? "" : "s") + " " +
+        (pointChange > 0 ? "to " : "from ") + fullName + "?\n\n" +
+        "Term: " + term.name + "\n" +
+        "Term points: " + currentTermTotal + " -> " + newTermTotal + "\n" +
+        "All time total: " + currentAllTimeTotal + " -> " + newAllTimeTotal
+      );
+
+      if (!confirmed) return;
+
+      const buttonsToDisable = [addButton, saveButton, deleteButton, subtractPointButton, addPointButton, applyPointsButton];
+      buttonsToDisable.forEach((button) => (button.disabled = true));
+      showResult("loading", "Updating points...");
+
+      try {
+        const studentRef = doc(db, "students", studentId);
+        const logRef = doc(collection(db, "recitationLogs"));
+        const termField = "termTotals." + term.id;
+        const batch = writeBatch(db);
+
+        batch.update(studentRef, {
+          fullName,
+          section,
+          gender,
+          totalPoints: newAllTimeTotal,
+          [termField]: newTermTotal,
+          latestAt: serverTimestamp(),
+          latestPoints: pointChange,
+          latestTermId: term.id,
+          latestTermName: term.name,
+          updatedAt: serverTimestamp()
+        });
+
+        batch.set(logRef, {
+          studentId,
+          fullName,
+          section,
+          points: pointChange,
+          activity: "Admin point edit",
+          termId: term.id,
+          termName: term.name,
+          schoolYear: term.schoolYear,
+          adminAdjustment: true,
+          adjustedBy: auth.currentUser.email || "",
+          createdAt: serverTimestamp()
+        });
+
+        await batch.commit();
+        pointsAdjustInput.value = "";
+        selectedStudent = {
+          ...selectedStudent,
+          fullName,
+          section,
+          gender,
+          totalPoints: newAllTimeTotal,
+          termTotals: {
+            ...(selectedStudent.termTotals || {}),
+            [term.id]: newTermTotal
+          },
+          latestPoints: pointChange
+        };
+        refreshPointsEditor();
+        showResult("success", "Points updated: " + fullName + " " + (pointChange > 0 ? "+" : "") + pointChange + " | " + term.name);
+      } catch (error) {
+        showResult("error", "Point edit failed:\n" + error.message);
+      } finally {
+        buttonsToDisable.forEach((button) => (button.disabled = false));
       }
     }
 
@@ -1291,6 +1578,9 @@
       unsubscribeStudents = onSnapshot(query(collection(db, "students")), (snapshot) => {
         allStudents = snapshot.docs.map(normalizeStudent);
         renderStudents();
+        if (selectedStudent && studentModal.classList.contains("active")) {
+          refreshPointsEditor();
+        }
         hideResult();
       }, (error) => showResult("error", "Students error:\n" + error.message));
     }
@@ -1381,9 +1671,18 @@
     addButton.addEventListener("click", () => saveStudent("add"));
     saveButton.addEventListener("click", () => saveStudent("edit"));
     deleteButton.addEventListener("click", deleteStudent);
+    subtractPointButton.addEventListener("click", () => adjustStudentPoints(-1));
+    addPointButton.addEventListener("click", () => adjustStudentPoints(1));
+    applyPointsButton.addEventListener("click", () => adjustStudentPoints(Number(pointsAdjustInput.value)));
+    pointsAdjustInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") adjustStudentPoints(Number(pointsAdjustInput.value));
+    });
     sectionFilter.addEventListener("change", renderStudents);
     sortSelect.addEventListener("change", renderStudents);
-    termSelect.addEventListener("change", renderStudents);
+    termSelect.addEventListener("change", () => {
+      renderStudents();
+      if (selectedStudent && studentModal.classList.contains("active")) refreshPointsEditor();
+    });
     searchInput.addEventListener("input", renderStudents);
     refreshButton.addEventListener("click", subscribeData);
     exportButton.addEventListener("click", exportAllStudents);
