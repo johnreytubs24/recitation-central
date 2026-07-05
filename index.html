@@ -1122,7 +1122,7 @@
       verbose: false
     });
 
-    const SCAN_COOLDOWN_MS = 15000;
+    const SCAN_COOLDOWN_MS = 60000;
     const SCANNER_PAUSE_MS = 900;
     const REQUEST_TIMEOUT_MS = 18000;
     const SCANNER_REQUEST_TIMEOUT_MS = 30000;
@@ -1487,7 +1487,7 @@
       showResult(
         scannerResult,
         "queued",
-        "Please move to the next student.\nThis ID was just scanned."
+        "Wait 1 minute before scanning this same student again."
       );
     }
 
@@ -1495,9 +1495,11 @@
       const scanKey = normalizeStudentId(studentIdValue).toUpperCase();
       if (!scanKey) return false;
 
-      // While the same QR remains in front of the camera, ignore repeated frames silently.
-      // This prevents warning messages when the student ID is held too long.
-      if (scanKey === lastCameraScanKey) return true;
+      cleanupScanLocks();
+
+      // Same QR frames should be ignored silently while the 1-minute student lock is active.
+      // After 1 minute, the same student can be scanned again even if they are still next.
+      if (scanKey === lastCameraScanKey && recentScanLocks.has(scanKey)) return true;
 
       lastCameraScanKey = scanKey;
       return false;
@@ -1849,9 +1851,10 @@
             if (shouldIgnoreHeldCameraScan(studentId)) return;
 
             const scanItem = prepareScan(studentId, "camera");
-            pauseScannerBriefly();
+            if (!scanItem) return;
 
-            if (scanItem) enqueueScan(scanItem);
+            pauseScannerBriefly();
+            enqueueScan(scanItem);
           }
         );
 

@@ -525,7 +525,7 @@
     const QUEUE_KEY = "recitationWatchPendingQueueV1";
     const STUDENT_CACHE_KEY = "recitationWatchStudentCacheV1";
     const studentCache = new Map();
-    const SCAN_COOLDOWN_MS = 15000;
+    const SCAN_COOLDOWN_MS = 60000;
     const SCANNER_PAUSE_MS = 900;
     let selectedPoints = 1;
     let scannerStarted = false;
@@ -657,7 +657,13 @@
     function shouldIgnoreHeldCameraScan(studentIdValue) {
       const scanKey = normalizeStudentId(studentIdValue).toUpperCase();
       if (!scanKey) return false;
-      if (scanKey === lastCameraScanKey) return true;
+
+      cleanupLocks();
+
+      // Same QR frames should be ignored silently while the 1-minute student lock is active.
+      // After 1 minute, the same student can be scanned again even if they are still next.
+      if (scanKey === lastCameraScanKey && recentLocks.has(scanKey)) return true;
+
       lastCameraScanKey = scanKey;
       return false;
     }
@@ -881,22 +887,22 @@
       if (!auth.currentUser) {
         showFeedback("error", "❌ LOGIN", "Sign in first", "", "");
         errorFeedback();
-        return;
+        return false;
       }
 
       if (!studentId) {
         showFeedback("error", "❌ NO ID", "Scan again", "", "");
         errorFeedback();
-        return;
+        return false;
       }
 
       const lockKey = buildLockKey(studentId, points);
       if (recentLocks.has(lockKey)) {
         if (source !== "camera") {
-          showFeedback("wait", "⚠️ WAIT", "This ID was just scanned", "", "Move to next");
+          showFeedback("wait", "⚠️ WAIT", "Wait 1 minute before same student", "", "Try again later");
           waitFeedback();
         }
-        return;
+        return false;
       }
 
       recentLocks.set(lockKey, Date.now() + SCAN_COOLDOWN_MS);
@@ -911,17 +917,19 @@
         showFeedback("", "✅ POINT ADDED", saved.fullName, "+" + points + " POINT" + (points === 1 ? "" : "S"), "TOTAL: " + saved.total);
         successFeedback();
         if (navigator.onLine) syncQueue().catch(() => {});
+        return true;
       } catch (error) {
         if (!navigator.onLine || /offline|network|unavailable|failed/i.test(error.message)) {
           queueScan(studentId, points);
           waitFeedback();
-          return;
+          return true;
         }
 
         recentLocks.delete(lockKey);
         setStatus("Failed. Try again.");
         showFeedback("error", "❌ FAILED", error.message.replace(/^FirebaseError:\s*/i, ""), "", "");
         errorFeedback();
+        return false;
       }
     }
 
@@ -949,12 +957,13 @@
         await scanner.start(
           { facingMode: "environment" },
           { fps: 12, qrbox: { width: qrSize, height: qrSize }, aspectRatio: 1, disableFlip: true },
-          (decodedText) => {
+          async (decodedText) => {
             if (scanPauseActive) return;
             const studentId = normalizeStudentId(decodedText);
             if (shouldIgnoreHeldCameraScan(studentId)) return;
-            pauseScannerBriefly();
-            recordStudent(studentId, "camera");
+
+            const accepted = await recordStudent(studentId, "camera");
+            if (accepted) pauseScannerBriefly();
           }
         );
 
