@@ -1,4 +1,4 @@
-const CACHE_NAME = "recitation-central-admin-point-edit-v1";
+const CACHE_NAME = "recitation-central-admin-modal-scroll-v2";
 const APP_SHELL = [
   "./",
   "./index.html",

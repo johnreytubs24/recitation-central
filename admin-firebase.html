@@ -505,8 +505,10 @@
       z-index: 80;
       display: none;
       place-items: center;
+      align-items: center;
       padding: 14px;
       background: rgba(15, 23, 42, 0.58);
+      overflow-y: auto;
     }
 
     .modal-backdrop.active {
@@ -515,17 +517,29 @@
 
     .modal-card {
       width: min(560px, 100%);
+      max-height: calc(100vh - 28px);
+      max-height: calc(100dvh - 28px);
       border: 1px solid rgba(255, 255, 255, 0.32);
       padding: 16px;
       background: white;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+      scrollbar-gutter: stable;
     }
 
     .modal-header {
+      position: sticky;
+      top: -16px;
+      z-index: 2;
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto;
       gap: 10px;
       align-items: start;
-      margin-bottom: 12px;
+      margin: -16px -16px 12px;
+      padding: 16px 16px 12px;
+      background: white;
+      border-bottom: 1px solid rgba(15, 23, 42, 0.08);
     }
 
     .modal-header h2 {
@@ -550,8 +564,14 @@
     }
 
     .modal-actions {
+      position: sticky;
+      bottom: -16px;
+      z-index: 2;
       grid-template-columns: 1fr 1fr;
-      margin-top: 12px;
+      margin: 12px -16px -16px;
+      padding: 12px 16px 16px;
+      background: white;
+      border-top: 1px solid rgba(15, 23, 42, 0.08);
     }
 
     .delete-button {
@@ -607,6 +627,29 @@
       .filter-row,
       .modal-actions {
         grid-template-columns: 1fr;
+      }
+
+      .modal-backdrop {
+        padding: 10px;
+        align-items: start;
+      }
+
+      .modal-card {
+        max-height: calc(100vh - 20px);
+        max-height: calc(100dvh - 20px);
+        padding: 14px;
+      }
+
+      .modal-header {
+        top: -14px;
+        margin: -14px -14px 10px;
+        padding: 14px 14px 10px;
+      }
+
+      .modal-actions {
+        bottom: -14px;
+        margin: 12px -14px -14px;
+        padding: 10px 14px 14px;
       }
 
       .live-pill,
