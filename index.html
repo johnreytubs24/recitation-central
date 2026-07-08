@@ -1142,6 +1142,8 @@
     let localStudentCache = loadStudentCache();
     let lastAcceptedScanKey = "";
     let lastAcceptedScanAt = 0;
+    let lastHeldCameraStudent = "";
+    let lastHeldCameraAt = 0;
     let lastCameraWarningKey = "";
     let lastCameraWarningAt = 0;
 
@@ -1504,12 +1506,25 @@
     }
 
     function shouldIgnoreHeldCameraScan(studentIdValue) {
+      const id = normalizeStudentId(studentIdValue);
+      const now = Date.now();
+
+      // Same QR still in front of camera: ignore silently.
+      if (lastHeldCameraStudent === id && now - lastHeldCameraAt < 3000) {
+        lastHeldCameraAt = now;
+        return true;
+      }
+
+      lastHeldCameraStudent = id;
+      lastHeldCameraAt = now;
       return false;
     }
 
     function resetHeldCameraScan() {
       lastCameraWarningKey = "";
       lastCameraWarningAt = 0;
+      lastHeldCameraStudent = "";
+      lastHeldCameraAt = 0;
     }
 
     function pauseScannerBriefly() {
@@ -1853,7 +1868,6 @@
             const scanItem = prepareScan(studentId, "camera");
             if (!scanItem) return;
 
-            pauseScannerBriefly();
             enqueueScan(scanItem);
           }
         );
