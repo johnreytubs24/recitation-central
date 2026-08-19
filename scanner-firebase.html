@@ -452,7 +452,7 @@
 
     .bulk-controls {
       display: grid;
-      grid-template-columns: 1.1fr 0.8fr 1fr;
+      grid-template-columns: 0.9fr 1.1fr 0.75fr 1fr;
       gap: 8px;
       padding: 12px 14px;
       border-bottom: 1px solid var(--line);
@@ -550,6 +550,12 @@
       min-height: 44px;
       padding: 0 14px;
       font-size: 14px;
+    }
+
+    #recordBulkButton.deduct-mode {
+      border-color: #991b1b;
+      background: linear-gradient(135deg, #dc2626, #991b1b);
+      color: white;
     }
 
     .bulk-count {
@@ -663,7 +669,7 @@
 
       <div class="action-grid">
         <button id="startButton" type="button">Start Camera Scanner</button>
-        <button id="bulkButton" class="bulk-button" type="button">Bulk Recitation</button>
+        <button id="bulkButton" class="bulk-button" type="button">Bulk Points</button>
       </div>
       <div id="reader"></div>
       <div id="result" class="result"></div>
@@ -677,20 +683,27 @@
       <section class="modal">
         <div class="modal-header">
           <div>
-            <h2 id="bulkTitle">Bulk Recitation</h2>
-            <p>Select students, choose points, then record once.</p>
+            <h2 id="bulkTitle">Bulk Points</h2>
+            <p>Select students, choose Add or Deduct, set points, then apply once.</p>
           </div>
-          <button id="closeBulkButton" class="icon-button" type="button" aria-label="Close bulk recitation">×</button>
+          <button id="closeBulkButton" class="icon-button" type="button" aria-label="Close bulk points">×</button>
         </div>
 
         <div class="bulk-controls">
+          <div>
+            <label for="bulkAction">Action</label>
+            <select id="bulkAction">
+              <option value="add">Add Points (+)</option>
+              <option value="deduct">Deduct Points (-)</option>
+            </select>
+          </div>
           <div>
             <label for="bulkSectionFilter">Section</label>
             <select id="bulkSectionFilter"></select>
           </div>
           <div>
             <label for="bulkPoints">Points</label>
-            <input id="bulkPoints" type="number" min="1" value="1">
+            <input id="bulkPoints" type="number" min="1" step="1" value="1">
           </div>
           <div>
             <label for="bulkSearch">Search</label>
@@ -712,7 +725,7 @@
         <div class="bulk-footer">
           <div id="bulkCount" class="bulk-count">0 selected</div>
           <button id="cancelBulkButton" class="secondary" type="button">Cancel</button>
-          <button id="recordBulkButton" type="button">Record Bulk</button>
+          <button id="recordBulkButton" type="button">Add Bulk Points</button>
         </div>
       </section>
     </div>
@@ -770,6 +783,7 @@
     const bulkModal = document.getElementById("bulkModal");
     const closeBulkButton = document.getElementById("closeBulkButton");
     const cancelBulkButton = document.getElementById("cancelBulkButton");
+    const bulkAction = document.getElementById("bulkAction");
     const bulkSectionFilter = document.getElementById("bulkSectionFilter");
     const bulkPoints = document.getElementById("bulkPoints");
     const bulkSearch = document.getElementById("bulkSearch");
@@ -807,6 +821,7 @@
     let bulkStudents = [];
     let bulkLoaded = false;
     let bulkBusy = false;
+    const bulkSelectedIds = new Set();
 
     function setHeartMenu(open) {
       heartMenu.hidden = !open;
@@ -996,12 +1011,34 @@
     }
 
     function getSelectedBulkIds() {
-      return Array.from(bulkStudentList.querySelectorAll("input[data-student-id]:checked")).map((input) => input.dataset.studentId);
+      return Array.from(bulkSelectedIds);
+    }
+
+    function editableBulkTermPoints(student, termId) {
+      if (!student) return 0;
+      const termTotals = student.termTotals || {};
+      const explicitTermPoints = Number(termTotals[termId]) || 0;
+
+      if (termId === "term1") {
+        const assignedTermPoints = ["term1", "term2", "term3", "outOfTerm"].reduce((total, key) => {
+          return total + (Number(termTotals[key]) || 0);
+        }, 0);
+        const legacyUnassignedPoints = Math.max(0, (Number(student.totalPoints) || 0) - assignedTermPoints);
+        return explicitTermPoints + legacyUnassignedPoints;
+      }
+
+      return explicitTermPoints;
     }
 
     function updateBulkCount() {
-      const selectedCount = getSelectedBulkIds().length;
+      const selectedCount = bulkSelectedIds.size;
       bulkCount.textContent = selectedCount + " selected";
+    }
+
+    function updateBulkActionUI() {
+      const isDeduct = bulkAction.value === "deduct";
+      recordBulkButton.textContent = isDeduct ? "Deduct Bulk Points" : "Add Bulk Points";
+      recordBulkButton.classList.toggle("deduct-mode", isDeduct);
     }
 
     function renderBulkStudents() {
@@ -1025,13 +1062,19 @@
         const checkbox = document.createElement("input");
         checkbox.type = "checkbox";
         checkbox.dataset.studentId = student.id;
-        checkbox.addEventListener("change", updateBulkCount);
+        checkbox.checked = bulkSelectedIds.has(student.id);
+        checkbox.addEventListener("change", () => {
+          if (checkbox.checked) bulkSelectedIds.add(student.id);
+          else bulkSelectedIds.delete(student.id);
+          updateBulkCount();
+        });
 
         const text = document.createElement("div");
         const name = document.createElement("strong");
         name.textContent = student.fullName || student.id;
         const meta = document.createElement("span");
-        meta.textContent = (student.section || "No section") + " • " + student.id;
+        const currentTerm = getTermInfo();
+        meta.textContent = (student.section || "No section") + " • " + student.id + " • " + editableBulkTermPoints(student, currentTerm.id) + " pts this term";
 
         text.appendChild(name);
         text.appendChild(meta);
@@ -1082,7 +1125,9 @@
           id: studentDoc.id,
           fullName: data.fullName || "",
           section: data.section || "",
-          gender: data.gender || data.sex || ""
+          gender: data.gender || data.sex || "",
+          totalPoints: Number(data.totalPoints) || 0,
+          termTotals: data.termTotals || {}
         };
       }).sort(sortStudentsBySectionName);
 
@@ -1098,7 +1143,10 @@
       }
 
       unlockFeedback();
+      bulkAction.value = "add";
       bulkPoints.value = pointsInput.value || "1";
+      bulkSelectedIds.clear();
+      updateBulkActionUI();
       bulkModal.classList.add("open");
 
       try {
@@ -1110,23 +1158,19 @@
       }
     }
 
-    function closeBulkModal() {
-      if (bulkBusy) return;
+    function closeBulkModal(force = false) {
+      if (bulkBusy && !force) return;
       bulkModal.classList.remove("open");
     }
 
     function selectVisibleBulkStudents() {
-      bulkStudentList.querySelectorAll("input[data-student-id]").forEach((input) => {
-        input.checked = true;
-      });
-      updateBulkCount();
+      getVisibleBulkStudents().forEach((student) => bulkSelectedIds.add(student.id));
+      renderBulkStudents();
     }
 
     function clearBulkSelection() {
-      bulkStudentList.querySelectorAll("input[data-student-id]").forEach((input) => {
-        input.checked = false;
-      });
-      updateBulkCount();
+      bulkSelectedIds.clear();
+      renderBulkStudents();
     }
 
     async function recordBulkRecitation() {
@@ -1138,35 +1182,86 @@
       }
 
       const selectedIds = getSelectedBulkIds();
-      const points = Number(bulkPoints.value);
+      const pointAmount = Number(bulkPoints.value);
+      const action = bulkAction.value === "deduct" ? "deduct" : "add";
+      const pointChange = action === "deduct" ? -pointAmount : pointAmount;
       const term = getTermInfo();
       const termField = "termTotals." + term.id;
-      const activity = getDefaultActivityName() + " - Bulk";
+      const activity = action === "deduct" ? "Bulk Point Deduction" : getDefaultActivityName() + " - Bulk";
 
       if (!selectedIds.length) {
         bulkStatus.textContent = "Please select at least one student.";
         return;
       }
 
-      if (!Number.isFinite(points) || points <= 0) {
-        bulkStatus.textContent = "Invalid points.";
+      if (!Number.isFinite(pointAmount) || pointAmount <= 0 || !Number.isInteger(pointAmount)) {
+        bulkStatus.textContent = "Enter a whole number of points greater than 0.";
         return;
       }
-
-      const confirmed = confirm("Record +" + points + " point" + (points === 1 ? "" : "s") + " to " + selectedIds.length + " student" + (selectedIds.length === 1 ? "" : "s") + "?");
-      if (!confirmed) return;
-
-      const studentMap = new Map(bulkStudents.map((student) => [student.id, student]));
-      const selectedStudents = selectedIds.map((id) => studentMap.get(id)).filter(Boolean);
 
       bulkBusy = true;
       recordBulkButton.disabled = true;
       cancelBulkButton.disabled = true;
       closeBulkButton.disabled = true;
-      bulkStatus.textContent = "Recording bulk recitation...";
 
       try {
+        let selectedStudents;
+
+        if (action === "deduct") {
+          bulkStatus.textContent = "Checking current points before deduction...";
+          const freshSnapshot = await getDocs(collection(db, "students"));
+          const freshStudentMap = new Map(freshSnapshot.docs.map((studentDoc) => {
+            const data = studentDoc.data() || {};
+            return [studentDoc.id, {
+              id: studentDoc.id,
+              fullName: data.fullName || "",
+              section: data.section || "",
+              gender: data.gender || data.sex || "",
+              totalPoints: Number(data.totalPoints) || 0,
+              termTotals: data.termTotals || {}
+            }];
+          }));
+
+          selectedStudents = selectedIds.map((id) => freshStudentMap.get(id)).filter(Boolean);
+          const missingStudents = selectedIds.filter((id) => !freshStudentMap.has(id));
+          if (missingStudents.length) {
+            throw new Error(missingStudents.length + " selected student record(s) could not be found. Refresh Bulk Points and try again.");
+          }
+
+          const insufficient = selectedStudents.filter((student) => {
+            const termPoints = editableBulkTermPoints(student, term.id);
+            const allTimePoints = Number(student.totalPoints) || 0;
+            return termPoints < pointAmount || allTimePoints < pointAmount;
+          });
+
+          if (insufficient.length) {
+            const preview = insufficient.slice(0, 5).map((student) => {
+              return (student.fullName || student.id) + " (" + editableBulkTermPoints(student, term.id) + " pts)";
+            }).join(", ");
+            const moreText = insufficient.length > 5 ? " +" + (insufficient.length - 5) + " more" : "";
+            bulkStatus.textContent = "Deduction blocked: " + insufficient.length + " selected student(s) do not have enough " + term.name + " points.";
+            showResult("error", "Bulk deduction was not applied.\n" + insufficient.length + " selected student(s) have fewer than " + pointAmount + " points in " + term.name + ".\n" + preview + moreText);
+            errorFeedback();
+            return;
+          }
+        } else {
+          const studentMap = new Map(bulkStudents.map((student) => [student.id, student]));
+          selectedStudents = selectedIds.map((id) => studentMap.get(id)).filter(Boolean);
+        }
+
+        const verb = action === "deduct" ? "DEDUCT" : "ADD";
+        const direction = action === "deduct" ? " from " : " to ";
+        const confirmed = confirm(
+          verb + " " + pointAmount + " point" + (pointAmount === 1 ? "" : "s") + direction +
+          selectedStudents.length + " student" + (selectedStudents.length === 1 ? "" : "s") + "?\n\n" +
+          "Term: " + term.name + "\n" +
+          (action === "deduct" ? "Scores will never be allowed to go below 0." : "This will update the leaderboard immediately.")
+        );
+        if (!confirmed) return;
+
+        bulkStatus.textContent = action === "deduct" ? "Applying bulk deduction..." : "Recording bulk points...";
         const chunkSize = 200;
+
         for (let start = 0; start < selectedStudents.length; start += chunkSize) {
           const chunk = selectedStudents.slice(start, start + chunkSize);
           const batch = writeBatch(db);
@@ -1175,26 +1270,42 @@
             const studentRef = doc(db, "students", student.id);
             const logRef = doc(collection(db, "recitationLogs"));
 
-            batch.update(studentRef, {
-              totalPoints: increment(points),
-              [termField]: increment(points),
-              latestAt: serverTimestamp(),
-              latestPoints: points,
-              latestTermId: term.id,
-              latestTermName: term.name,
-              updatedAt: serverTimestamp()
-            });
+            if (action === "deduct") {
+              const currentTermTotal = editableBulkTermPoints(student, term.id);
+              const currentAllTimeTotal = Number(student.totalPoints) || 0;
+              batch.update(studentRef, {
+                totalPoints: currentAllTimeTotal - pointAmount,
+                [termField]: currentTermTotal - pointAmount,
+                latestAt: serverTimestamp(),
+                latestPoints: pointChange,
+                latestTermId: term.id,
+                latestTermName: term.name,
+                updatedAt: serverTimestamp()
+              });
+            } else {
+              batch.update(studentRef, {
+                totalPoints: increment(pointAmount),
+                [termField]: increment(pointAmount),
+                latestAt: serverTimestamp(),
+                latestPoints: pointAmount,
+                latestTermId: term.id,
+                latestTermName: term.name,
+                updatedAt: serverTimestamp()
+              });
+            }
 
             batch.set(logRef, {
               studentId: student.id,
               fullName: student.fullName || "",
               section: student.section || "",
-              points,
+              points: pointChange,
               activity,
               termId: term.id,
               termName: term.name,
               schoolYear: term.schoolYear,
               bulk: true,
+              bulkDeduction: action === "deduct",
+              adjustedBy: auth.currentUser.email || "",
               createdAt: serverTimestamp()
             });
           });
@@ -1202,14 +1313,16 @@
           await batch.commit();
         }
 
-        showResult("success", "Bulk recorded: +" + points + " to " + selectedStudents.length + " student" + (selectedStudents.length === 1 ? "" : "s") + ".\n" + term.name + " | Leaderboard updates live.");
-        addRecent("Bulk Recitation: " + selectedStudents.length + " student" + (selectedStudents.length === 1 ? "" : "s") + " +" + points + "\n" + term.name);
-        clearBulkSelection();
-        closeBulkModal();
+        const sign = action === "deduct" ? "-" : "+";
+        showResult("success", (action === "deduct" ? "Bulk deduction applied: " : "Bulk points added: ") + sign + pointAmount + " to " + selectedStudents.length + " student" + (selectedStudents.length === 1 ? "" : "s") + ".\n" + term.name + " | Leaderboard updates live.");
+        addRecent((action === "deduct" ? "Bulk Deduction: " : "Bulk Recitation: ") + selectedStudents.length + " student" + (selectedStudents.length === 1 ? "" : "s") + " " + sign + pointAmount + "\n" + term.name);
+        bulkSelectedIds.clear();
+        bulkLoaded = false;
+        closeBulkModal(true);
         successFeedback();
       } catch (error) {
-        showResult("error", "Bulk save failed:\n" + error.message);
-        bulkStatus.textContent = "Bulk save failed.";
+        showResult("error", (action === "deduct" ? "Bulk deduction failed:\n" : "Bulk save failed:\n") + error.message);
+        bulkStatus.textContent = action === "deduct" ? "Bulk deduction failed." : "Bulk save failed.";
         errorFeedback();
       } finally {
         bulkBusy = false;
@@ -1418,11 +1531,12 @@
 
     startButton.addEventListener("click", startScanner);
     bulkButton.addEventListener("click", openBulkModal);
-    closeBulkButton.addEventListener("click", closeBulkModal);
-    cancelBulkButton.addEventListener("click", closeBulkModal);
+    closeBulkButton.addEventListener("click", () => closeBulkModal());
+    cancelBulkButton.addEventListener("click", () => closeBulkModal());
     bulkModal.addEventListener("click", (event) => {
       if (event.target === bulkModal) closeBulkModal();
     });
+    bulkAction.addEventListener("change", updateBulkActionUI);
     bulkSectionFilter.addEventListener("change", renderBulkStudents);
     bulkSearch.addEventListener("input", renderBulkStudents);
     selectVisibleButton.addEventListener("click", selectVisibleBulkStudents);
@@ -1474,6 +1588,7 @@
         closeBulkModal();
         bulkLoaded = false;
         bulkStudents = [];
+        bulkSelectedIds.clear();
         showAuth("queued", "Sign in required before scanning.");
       }
     });
