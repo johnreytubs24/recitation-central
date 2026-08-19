@@ -1,4 +1,4 @@
-const CACHE_NAME = "recitation-central-mobile-bulk-list-v2";
+const CACHE_NAME = "recitation-central-camera-modal-v3";
 const APP_SHELL = [
   "./",
   "./index.html",
