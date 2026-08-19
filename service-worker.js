@@ -1,4 +1,4 @@
-const CACHE_NAME = "recitation-central-bulk-deduction-v1";
+const CACHE_NAME = "recitation-central-mobile-bulk-list-v2";
 const APP_SHELL = [
   "./",
   "./index.html",

@@ -603,14 +603,137 @@
 
       .auth-grid,
       .manual-row,
-      .action-grid,
-      .bulk-controls,
-      .bulk-footer {
+      .action-grid {
         grid-template-columns: 1fr;
       }
 
-      .bulk-footer button {
+      /* Keep the Bulk Points modal usable on phones: controls stay compact
+         while the student area gets most of the screen and scrolls itself. */
+      .modal-backdrop {
+        align-items: stretch;
+        padding: 6px;
+      }
+
+      .modal {
         width: 100%;
+        height: calc(100vh - 12px);
+        height: calc(100dvh - 12px);
+        max-height: none;
+        border-radius: 14px;
+        grid-template-rows: auto auto minmax(0, 1fr) auto;
+      }
+
+      .modal-header {
+        padding: 10px 11px;
+        align-items: center;
+      }
+
+      .modal-header h2 {
+        font-size: 18px;
+      }
+
+      .modal-header p {
+        margin-top: 3px;
+        font-size: 11px;
+        line-height: 1.25;
+      }
+
+      .icon-button {
+        width: 38px;
+        min-height: 38px;
+        flex: 0 0 38px;
+      }
+
+      .bulk-controls {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px 8px;
+        padding: 7px 9px 8px;
+      }
+
+      .bulk-controls label {
+        display: block;
+        margin-bottom: 2px;
+        font-size: 10px;
+        line-height: 1.1;
+      }
+
+      .bulk-controls select,
+      .bulk-controls input {
+        min-height: 38px;
+        padding: 7px 8px;
+        border-radius: 9px;
+        font-size: 12px;
+      }
+
+      .bulk-list {
+        min-height: 0;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
+        padding: 6px 9px 10px;
+      }
+
+      .bulk-tools {
+        position: sticky;
+        top: -6px;
+        z-index: 2;
+        gap: 5px;
+        margin: 0 -1px 5px;
+        padding: 6px 1px 5px;
+        background: #ffffff;
+        font-size: 11px;
+      }
+
+      .bulk-tools > span:last-child {
+        display: flex;
+        gap: 4px;
+      }
+
+      .bulk-tools button {
+        min-height: 32px;
+        padding: 0 8px;
+        font-size: 10px;
+      }
+
+      .student-check {
+        gap: 8px;
+        min-height: 52px;
+        padding: 7px 9px;
+        margin-top: 5px;
+        border-radius: 9px;
+      }
+
+      .student-check input {
+        width: 24px;
+        min-height: 24px;
+      }
+
+      .student-check strong {
+        font-size: 13px;
+      }
+
+      .student-check span {
+        margin-top: 1px;
+        font-size: 10px;
+        line-height: 1.2;
+      }
+
+      .bulk-footer {
+        grid-template-columns: minmax(0, 1fr) auto auto;
+        gap: 6px;
+        padding: 8px 9px;
+      }
+
+      .bulk-footer button {
+        width: auto;
+        min-width: 0;
+        min-height: 40px;
+        padding: 0 10px;
+        font-size: 12px;
+      }
+
+      .bulk-count {
+        font-size: 11px;
       }
 
       .home-link {
