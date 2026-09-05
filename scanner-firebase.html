@@ -965,6 +965,7 @@
       getDocs,
       getFirestore,
       increment,
+      onSnapshot,
       runTransaction,
       serverTimestamp,
       writeBatch
@@ -1046,6 +1047,7 @@
     let bulkLoaded = false;
     let bulkBusy = false;
     const bulkSelectedIds = new Set();
+    let unsubscribeTermCalendar = null;
 
     function setHeartMenu(open) {
       heartMenu.hidden = !open;
@@ -1075,30 +1077,106 @@
       return String(value || "").trim();
     }
 
-    function getSchoolYear(date) {
+
+    const DEFAULT_TERM_CALENDAR = Object.freeze({
+      term1Start: "2026-06-01",
+      term2Start: "2026-09-07",
+      term3Start: "2027-01-04"
+    });
+    const TERM_CALENDAR_STORAGE_KEY = "recitationTermCalendarV1";
+    let termCalendar = loadCachedTermCalendar();
+
+    function normalizeDateKey(value) {
+      const text = String(value || "").trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return "";
+      const [year, month, day] = text.split("-").map(Number);
+      const parsed = new Date(year, month - 1, day);
+      if (
+        parsed.getFullYear() !== year ||
+        parsed.getMonth() !== month - 1 ||
+        parsed.getDate() !== day
+      ) return "";
+      return text;
+    }
+
+    function isValidTermCalendar(calendar) {
+      const t1 = normalizeDateKey(calendar && calendar.term1Start);
+      const t2 = normalizeDateKey(calendar && calendar.term2Start);
+      const t3 = normalizeDateKey(calendar && calendar.term3Start);
+      return Boolean(t1 && t2 && t3 && t1 < t2 && t2 < t3);
+    }
+
+    function normalizeTermCalendar(data) {
+      const candidate = {
+        term1Start: normalizeDateKey(data && data.term1Start),
+        term2Start: normalizeDateKey(data && data.term2Start),
+        term3Start: normalizeDateKey(data && data.term3Start)
+      };
+      return isValidTermCalendar(candidate) ? candidate : { ...DEFAULT_TERM_CALENDAR };
+    }
+
+    function loadCachedTermCalendar() {
+      try {
+        const cached = JSON.parse(localStorage.getItem(TERM_CALENDAR_STORAGE_KEY) || "null");
+        return normalizeTermCalendar(cached);
+      } catch (error) {
+        return { ...DEFAULT_TERM_CALENDAR };
+      }
+    }
+
+    function cacheTermCalendar(calendar) {
+      try {
+        localStorage.setItem(TERM_CALENDAR_STORAGE_KEY, JSON.stringify(calendar));
+      } catch (error) {}
+    }
+
+    function dateKeyFromDate(date) {
       const year = date.getFullYear();
-      const month = date.getMonth() + 1;
-      if (month >= 1 && month <= 4) return (year - 1) + "-" + year;
-      return year + "-" + (year + 1);
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      return `${year}-${month}-${day}`;
+    }
+
+    function nextSchoolYearStartKey() {
+      const [year, month, day] = termCalendar.term1Start.split("-").map(Number);
+      const next = new Date(year + 1, month - 1, day);
+      return dateKeyFromDate(next);
+    }
+
+    function configuredSchoolYear() {
+      const startYear = Number(termCalendar.term1Start.slice(0, 4));
+      return startYear + "-" + (startYear + 1);
     }
 
     function getTermInfo(date = new Date()) {
-      const monthDay = (date.getMonth() + 1) * 100 + date.getDate();
-      const schoolYear = getSchoolYear(date);
+      const key = dateKeyFromDate(date);
+      const schoolYear = configuredSchoolYear();
+      const nextTerm1Start = nextSchoolYearStartKey();
 
-      if (monthDay >= 601 && monthDay <= 906) {
+      if (key >= termCalendar.term1Start && key < termCalendar.term2Start) {
         return { id: "term1", name: "Term 1", schoolYear };
       }
 
-      if (monthDay >= 907 && monthDay <= 1215) {
+      if (key >= termCalendar.term2Start && key < termCalendar.term3Start) {
         return { id: "term2", name: "Term 2", schoolYear };
       }
 
-      if (monthDay >= 104 && monthDay <= 403) {
+      if (key >= termCalendar.term3Start && key < nextTerm1Start) {
         return { id: "term3", name: "Term 3", schoolYear };
       }
 
       return { id: "outOfTerm", name: "Outside Term", schoolYear };
+    }
+
+    function subscribeTermCalendar() {
+      if (unsubscribeTermCalendar) unsubscribeTermCalendar();
+      unsubscribeTermCalendar = onSnapshot(doc(db, "settings", "termCalendar"), (snapshot) => {
+        if (!snapshot.exists()) return;
+        termCalendar = normalizeTermCalendar(snapshot.data() || {});
+        cacheTermCalendar(termCalendar);
+      }, (error) => {
+        console.warn("Term calendar unavailable; using cached/default dates.", error);
+      });
     }
 
     function getDefaultActivityName() {
@@ -1864,7 +1942,10 @@
 
       if (signedIn) {
         showAuth("success", "Signed in: " + user.email);
+        subscribeTermCalendar();
       } else {
+        if (unsubscribeTermCalendar) unsubscribeTermCalendar();
+        unsubscribeTermCalendar = null;
         closeCameraModal();
         closeBulkModal();
         bulkLoaded = false;

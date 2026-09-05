@@ -344,6 +344,56 @@
       line-height: 1;
     }
 
+    .term-settings-panel {
+      margin-bottom: 12px;
+    }
+
+    .term-settings-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      align-items: end;
+    }
+
+    .term-settings-help {
+      margin: -2px 0 12px;
+      color: #64748b;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .term-settings-actions {
+      display: grid;
+      grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
+      gap: 10px;
+      align-items: center;
+      margin-top: 10px;
+    }
+
+    .term-settings-status {
+      min-height: 24px;
+      color: #64748b;
+      font-size: 13px;
+      font-weight: 800;
+      line-height: 1.4;
+    }
+
+    .term-settings-status.success-text { color: #166534; }
+    .term-settings-status.error-text { color: #991b1b; }
+
+    .active-term-badge {
+      border: 1px solid rgba(245, 158, 11, 0.35);
+      border-radius: 999px;
+      padding: 5px 9px;
+      background: #fff7d6;
+      color: #78350f;
+      font-size: 11px;
+      font-weight: 950;
+      letter-spacing: 0;
+      text-transform: none;
+      white-space: nowrap;
+    }
+
     .summary {
       display: none;
       margin-top: 10px;
@@ -625,7 +675,9 @@
       .auth-row,
       .pin-row,
       .filter-row,
-      .modal-actions {
+      .modal-actions,
+      .term-settings-grid,
+      .term-settings-actions {
         grid-template-columns: 1fr;
       }
 
@@ -706,6 +758,32 @@
     <div id="result" class="result"></div>
 
     <section id="adminPanel" class="panel" hidden>
+      <section class="panel term-settings-panel" aria-labelledby="termSettingsTitle">
+        <div class="panel-title">
+          <span id="termSettingsTitle">Academic Term Calendar</span>
+          <span id="activeTermBadge" class="active-term-badge">Loading calendar...</span>
+        </div>
+        <p class="term-settings-help">Set the official start date of each term. Once saved, the Admin, QR Scanner, Watch Scanner, and Firebase Leaderboard will use the same dates automatically.</p>
+        <div class="term-settings-grid">
+          <div>
+            <label for="term1StartInput">Term 1 Start</label>
+            <input id="term1StartInput" type="date">
+          </div>
+          <div>
+            <label for="term2StartInput">Term 2 Start</label>
+            <input id="term2StartInput" type="date">
+          </div>
+          <div>
+            <label for="term3StartInput">Term 3 Start</label>
+            <input id="term3StartInput" type="date">
+          </div>
+        </div>
+        <div class="term-settings-actions">
+          <button id="saveTermCalendarButton" type="button">Save Term Dates</button>
+          <div id="termSettingsStatus" class="term-settings-status" role="status" aria-live="polite"></div>
+        </div>
+      </section>
+
       <div class="panel-title">
         <span>Students</span>
         <button id="openModalButton" class="add-button" type="button" aria-label="Add student">+</button>
@@ -859,6 +937,12 @@
     const heartMenuButton = document.getElementById("heartMenuButton");
     const heartMenu = document.getElementById("heartMenu");
     const adminPanel = document.getElementById("adminPanel");
+    const term1StartInput = document.getElementById("term1StartInput");
+    const term2StartInput = document.getElementById("term2StartInput");
+    const term3StartInput = document.getElementById("term3StartInput");
+    const saveTermCalendarButton = document.getElementById("saveTermCalendarButton");
+    const termSettingsStatus = document.getElementById("termSettingsStatus");
+    const activeTermBadge = document.getElementById("activeTermBadge");
     const resultBox = document.getElementById("result");
     const sectionFilter = document.getElementById("sectionFilter");
     const sortSelect = document.getElementById("sortSelect");
@@ -895,6 +979,7 @@
     let selectedStudent = null;
     let unsubscribeStudents = null;
     let unsubscribeSections = null;
+    let unsubscribeTermCalendar = null;
 
     function setHeartMenu(open) {
       heartMenu.hidden = !open;
@@ -954,30 +1039,163 @@
       return cleaned || fallback || "Section";
     }
 
-    function getSchoolYear(date) {
+
+    const DEFAULT_TERM_CALENDAR = Object.freeze({
+      term1Start: "2026-06-01",
+      term2Start: "2026-09-07",
+      term3Start: "2027-01-04"
+    });
+    const TERM_CALENDAR_STORAGE_KEY = "recitationTermCalendarV1";
+    let termCalendar = loadCachedTermCalendar();
+
+    function normalizeDateKey(value) {
+      const text = String(value || "").trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return "";
+      const [year, month, day] = text.split("-").map(Number);
+      const parsed = new Date(year, month - 1, day);
+      if (
+        parsed.getFullYear() !== year ||
+        parsed.getMonth() !== month - 1 ||
+        parsed.getDate() !== day
+      ) return "";
+      return text;
+    }
+
+    function isValidTermCalendar(calendar) {
+      const t1 = normalizeDateKey(calendar && calendar.term1Start);
+      const t2 = normalizeDateKey(calendar && calendar.term2Start);
+      const t3 = normalizeDateKey(calendar && calendar.term3Start);
+      return Boolean(t1 && t2 && t3 && t1 < t2 && t2 < t3);
+    }
+
+    function normalizeTermCalendar(data) {
+      const candidate = {
+        term1Start: normalizeDateKey(data && data.term1Start),
+        term2Start: normalizeDateKey(data && data.term2Start),
+        term3Start: normalizeDateKey(data && data.term3Start)
+      };
+      return isValidTermCalendar(candidate) ? candidate : { ...DEFAULT_TERM_CALENDAR };
+    }
+
+    function loadCachedTermCalendar() {
+      try {
+        const cached = JSON.parse(localStorage.getItem(TERM_CALENDAR_STORAGE_KEY) || "null");
+        return normalizeTermCalendar(cached);
+      } catch (error) {
+        return { ...DEFAULT_TERM_CALENDAR };
+      }
+    }
+
+    function cacheTermCalendar(calendar) {
+      try {
+        localStorage.setItem(TERM_CALENDAR_STORAGE_KEY, JSON.stringify(calendar));
+      } catch (error) {}
+    }
+
+    function dateKeyFromDate(date) {
       const year = date.getFullYear();
-      const month = date.getMonth() + 1;
-      if (month >= 1 && month <= 4) return (year - 1) + "-" + year;
-      return year + "-" + (year + 1);
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      return `${year}-${month}-${day}`;
+    }
+
+    function nextSchoolYearStartKey() {
+      const [year, month, day] = termCalendar.term1Start.split("-").map(Number);
+      const next = new Date(year + 1, month - 1, day);
+      return dateKeyFromDate(next);
+    }
+
+    function configuredSchoolYear() {
+      const startYear = Number(termCalendar.term1Start.slice(0, 4));
+      return startYear + "-" + (startYear + 1);
     }
 
     function getTermInfo(date = new Date()) {
-      const monthDay = (date.getMonth() + 1) * 100 + date.getDate();
-      const schoolYear = getSchoolYear(date);
+      const key = dateKeyFromDate(date);
+      const schoolYear = configuredSchoolYear();
+      const nextTerm1Start = nextSchoolYearStartKey();
 
-      if (monthDay >= 601 && monthDay <= 906) {
+      if (key >= termCalendar.term1Start && key < termCalendar.term2Start) {
         return { id: "term1", name: "Term 1", schoolYear };
       }
 
-      if (monthDay >= 907 && monthDay <= 1215) {
+      if (key >= termCalendar.term2Start && key < termCalendar.term3Start) {
         return { id: "term2", name: "Term 2", schoolYear };
       }
 
-      if (monthDay >= 104 && monthDay <= 403) {
+      if (key >= termCalendar.term3Start && key < nextTerm1Start) {
         return { id: "term3", name: "Term 3", schoolYear };
       }
 
       return { id: "outOfTerm", name: "Outside Term", schoolYear };
+    }
+
+    function setTermSettingsStatus(message, type = "") {
+      termSettingsStatus.textContent = message;
+      termSettingsStatus.className = "term-settings-status" + (type ? " " + type : "");
+    }
+
+    function refreshTermCalendarUi() {
+      term1StartInput.value = termCalendar.term1Start;
+      term2StartInput.value = termCalendar.term2Start;
+      term3StartInput.value = termCalendar.term3Start;
+      const current = getTermInfo();
+      activeTermBadge.textContent = current.name + " • SY " + current.schoolYear;
+      if (typeof renderStudents === "function" && allStudents.length) renderStudents();
+      if (selectedStudent && studentModal.classList.contains("active")) refreshPointsEditor();
+    }
+
+    function subscribeTermCalendar() {
+      if (unsubscribeTermCalendar) unsubscribeTermCalendar();
+      unsubscribeTermCalendar = onSnapshot(doc(db, "settings", "termCalendar"), (snapshot) => {
+        if (snapshot.exists()) {
+          const loaded = normalizeTermCalendar(snapshot.data() || {});
+          termCalendar = loaded;
+          cacheTermCalendar(termCalendar);
+          refreshTermCalendarUi();
+          setTermSettingsStatus("Saved calendar loaded from Firebase.", "success-text");
+        } else {
+          termCalendar = { ...DEFAULT_TERM_CALENDAR };
+          cacheTermCalendar(termCalendar);
+          refreshTermCalendarUi();
+          setTermSettingsStatus("Using default dates. Click Save Term Dates to store them in Firebase.");
+        }
+      }, (error) => {
+        refreshTermCalendarUi();
+        setTermSettingsStatus("Could not read calendar settings. Using cached/default dates. " + error.message, "error-text");
+      });
+    }
+
+    async function saveTermCalendar() {
+      const candidate = {
+        term1Start: normalizeDateKey(term1StartInput.value),
+        term2Start: normalizeDateKey(term2StartInput.value),
+        term3Start: normalizeDateKey(term3StartInput.value)
+      };
+
+      if (!isValidTermCalendar(candidate)) {
+        setTermSettingsStatus("Please use valid dates in order: Term 1 < Term 2 < Term 3.", "error-text");
+        return;
+      }
+
+      saveTermCalendarButton.disabled = true;
+      setTermSettingsStatus("Saving term dates...");
+      try {
+        await setDoc(doc(db, "settings", "termCalendar"), {
+          ...candidate,
+          schoolYear: Number(candidate.term1Start.slice(0, 4)) + "-" + (Number(candidate.term1Start.slice(0, 4)) + 1),
+          updatedAt: serverTimestamp(),
+          updatedBy: auth.currentUser ? (auth.currentUser.email || auth.currentUser.uid) : ""
+        }, { merge: true });
+        termCalendar = candidate;
+        cacheTermCalendar(termCalendar);
+        refreshTermCalendarUi();
+        setTermSettingsStatus("Term dates saved. All Firebase screens will follow this calendar.", "success-text");
+      } catch (error) {
+        setTermSettingsStatus("Save failed: " + error.message, "error-text");
+      } finally {
+        saveTermCalendarButton.disabled = false;
+      }
     }
 
     function selectedTermId() {
@@ -1656,6 +1874,8 @@
       if (unsubscribeSections) unsubscribeSections();
       unsubscribeStudents = null;
       unsubscribeSections = null;
+      if (unsubscribeTermCalendar) unsubscribeTermCalendar();
+      unsubscribeTermCalendar = null;
       adminPanel.hidden = true;
       setHeartMenu(false);
       await signOut(auth);
@@ -1672,6 +1892,8 @@
       if (signedIn) {
         adminPanel.hidden = false;
         showResult("success", "Signed in: " + user.email);
+        refreshTermCalendarUi();
+        subscribeTermCalendar();
         subscribeData();
       } else {
         hideResult();
@@ -1730,6 +1952,8 @@
     refreshButton.addEventListener("click", subscribeData);
     exportButton.addEventListener("click", exportAllStudents);
     exportLogsButton.addEventListener("click", exportAllLogs);
+    saveTermCalendarButton.addEventListener("click", saveTermCalendar);
+    refreshTermCalendarUi();
   </script>
 </body>
 </html>
