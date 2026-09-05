@@ -965,11 +965,11 @@
       const monthDay = (date.getMonth() + 1) * 100 + date.getDate();
       const schoolYear = getSchoolYear(date);
 
-      if (monthDay >= 601 && monthDay <= 909) {
+      if (monthDay >= 601 && monthDay <= 906) {
         return { id: "term1", name: "Term 1", schoolYear };
       }
 
-      if (monthDay >= 910 && monthDay <= 1215) {
+      if (monthDay >= 907 && monthDay <= 1215) {
         return { id: "term2", name: "Term 2", schoolYear };
       }
 
